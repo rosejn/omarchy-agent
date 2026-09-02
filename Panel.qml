@@ -147,8 +147,8 @@ Panel {
                       cursorShape: Qt.PointingHandCursor
                       onClicked: {
                         root.threadMenuId = threadRow.modelData.id
-                        root.threadMenuX = threadRow.mapToItem(panel, threadRow.width - threadActionsPopup.width - Style.space(4), threadRow.height).x
-                        root.threadMenuY = threadRow.mapToItem(panel, 0, threadRow.height).y
+                        root.threadMenuX = threadRow.mapToItem(root, threadRow.width - threadActionsPopup.width - Style.space(4), threadRow.height).x
+                        root.threadMenuY = threadRow.mapToItem(root, 0, threadRow.height).y
                         threadActionsPopup.open()
                       }
                     }
@@ -203,9 +203,9 @@ Panel {
               Text { id: thinkingControl; text: root.client.providerLabel + " " + root.client.modelLabel + " - Thinking: " + root.client.thinking; color: root.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; elide: Text.ElideLeft; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: thinkingMenu.open() } }
               Popup {
                 id: thinkingMenu
-                parent: panel
-                x: thinkingControl.mapToItem(panel, thinkingControl.width - width, 0).x
-                y: thinkingControl.mapToItem(panel, 0, thinkingControl.height).y + Style.space(6)
+                parent: root
+                x: thinkingControl.mapToItem(root, thinkingControl.width - width, 0).x
+                y: thinkingControl.mapToItem(root, 0, thinkingControl.height).y + Style.space(6)
                 width: Style.space(132)
                 padding: Style.space(4)
                 background: Rectangle {
@@ -328,7 +328,7 @@ Panel {
 
         Popup {
           id: threadActionsPopup
-          parent: panel
+          parent: root
           x: root.threadMenuX
           y: root.threadMenuY
           width: Style.space(150)
@@ -357,7 +357,7 @@ Panel {
 
         Popup {
           id: renamePopup
-          parent: panel
+          parent: root
           anchors.centerIn: parent
           width: Style.space(300)
           padding: Style.space(12)
@@ -387,7 +387,7 @@ Panel {
 
         Popup {
           id: deletePopup
-          parent: panel
+          parent: root
           anchors.centerIn: parent
           width: Style.space(300)
           padding: Style.space(12)
