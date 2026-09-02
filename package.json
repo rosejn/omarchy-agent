@@ -1,0 +1,9 @@
+{
+  "name": "omarchy-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistent Pi-backed agent service for Omarchy",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node daemon/index.mjs", "test": "node --test daemon/test/*.test.mjs" }
+}

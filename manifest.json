@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "org.omarchy.agent",
+  "name": "Omarchy Agent",
+  "version": "0.1.0",
+  "author": "Omarchy",
+  "license": "MIT",
+  "description": "A persistent, system-aware Pi agent in the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "Omarchy Agent",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "socketPath": "",
+      "autostartDaemon": true,
+      "idleMinutes": 30,
+      "hideDormantAfterDays": 30
+    },
+    "schema": [
+      { "key": "socketPath", "type": "string", "label": "Daemon socket path (blank = default)" },
+      { "key": "autostartDaemon", "type": "bool", "label": "Start the agent service automatically" },
+      { "key": "idleMinutes", "type": "int", "label": "Minutes before an inactive thread is reviewed" },
+      { "key": "hideDormantAfterDays", "type": "int", "label": "Days before inactive threads leave the default list" }
+    ]
+  }
+}
