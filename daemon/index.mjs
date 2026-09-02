@@ -269,6 +269,22 @@ async function dispatch(method, params = {}) {
     const thread = { id: crypto.randomUUID(), title: titleFor(initial), preview: initial, project: isProject(initial), pinned: isProject(initial), archived: false, createdAt: now, lastActivity: now };
     threads.unshift(thread); await writeThreads(); return threadSummary(thread);
   }
+  if (method === "renameThread") {
+    const thread = threads.find(t => t.id === params.threadId);
+    if (!thread) throw new Error("Thread not found");
+    const title = String(params.title || "").replace(/\s+/g, " ").trim();
+    if (!title) throw new Error("Title cannot be empty");
+    thread.title = title.length > 80 ? `${title.slice(0, 77)}…` : title;
+    await writeThreads(); return threadSummary(thread);
+  }
+  if (method === "deleteThread") {
+    const index = threads.findIndex(t => t.id === params.threadId);
+    if (index < 0) throw new Error("Thread not found");
+    const [removed] = threads.splice(index, 1);
+    const runner = runners.get(removed.id);
+    if (runner) { runner.stop(); runners.delete(removed.id); }
+    await writeThreads(); return { id: removed.id };
+  }
   const thread = threads.find(t => t.id === params.threadId);
   if (!thread) throw new Error("Thread not found");
   if (method === "messages") {

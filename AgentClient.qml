@@ -113,6 +113,19 @@ Item {
   function setThinking(level) {
     request("setThinking", { thinking: level }, function(data) { root.thinking = data.thinking || level })
   }
+  function renameThread(id, title) {
+    request("renameThread", { threadId: id, title: title }, function(thread) {
+      var list = root.threads.slice()
+      for (var i = 0; i < list.length; i++) if (list[i].id === thread.id) list[i] = thread
+      root.threads = list
+    })
+  }
+  function deleteThread(id) {
+    request("deleteThread", { threadId: id }, function(result) {
+      root.threads = root.threads.filter(function(thread) { return thread.id !== result.id })
+      if (root.activeThreadId === result.id) root.newThread()
+    })
+  }
   function chooseProvider(name) {
     request("configure", { provider: name }, function(data) { root.configured = true; root.provider = data.provider || name; root.providerReady = name === "ollama"; root.refresh() })
   }
