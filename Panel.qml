@@ -145,7 +145,7 @@ Panel {
             spacing: Style.space(7)
             Row {
               width: parent.width
-              Text { text: root.client.activeThreadId.length > 0 ? "Omarchy Agent" : "New conversation"; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.subtitle; font.bold: true; width: parent.width - thinkingControl.width - statusMark.width - Style.space(12) }
+              Text { text: root.client.activeThreadId.length > 0 ? "Omarchy Agent" : "New conversation"; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.subtitle; font.bold: true; width: parent.width - thinkingControl.width - statusMark.width - Style.space(12); elide: Text.ElideRight }
               Text {
                 id: statusMark
                 text: root.client.activityGlyph
@@ -155,7 +155,7 @@ Panel {
                 width: Style.space(14)
                 horizontalAlignment: Text.AlignHCenter
                 RotationAnimation on rotation {
-                  running: root.client.activityState === "receiving"
+                  running: root.client.activityState === "receiving" || root.client.activityState === "working"
                   from: 0; to: 360; duration: 1100; loops: Animation.Infinite
                 }
                 SequentialAnimation on opacity {
@@ -165,16 +165,57 @@ Panel {
                   NumberAnimation { to: 0.9; duration: 500 }
                 }
               }
-              Text { id: thinkingControl; text: "Thinking: " + root.client.thinking; color: root.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: thinkingMenu.open() } }
-              Menu {
+              Text { id: thinkingControl; text: root.client.providerLabel + " " + root.client.modelLabel + " - Thinking: " + root.client.thinking; color: root.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; elide: Text.ElideLeft; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: thinkingMenu.open() } }
+              Popup {
                 id: thinkingMenu
-                Repeater { model: ["off", "low", "medium", "high", "xhigh"]; delegate: MenuItem { required property string modelData; text: modelData; onTriggered: root.client.setThinking(modelData) } }
+                parent: panel
+                x: thinkingControl.mapToItem(panel, thinkingControl.width - width, 0).x
+                y: thinkingControl.mapToItem(panel, 0, thinkingControl.height).y + Style.space(6)
+                width: Style.space(132)
+                padding: Style.space(4)
+                background: Rectangle {
+                  color: Color.background
+                  border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
+                  border.width: 1
+                  radius: Style.space(8)
+                }
+                contentItem: Column {
+                  spacing: Style.space(2)
+                  Repeater {
+                    model: ["off", "low", "medium", "high", "xhigh"]
+                    delegate: Rectangle {
+                      required property string modelData
+                      width: thinkingMenu.width - thinkingMenu.padding * 2
+                      height: Style.space(26)
+                      radius: Style.space(5)
+                      color: optionMouse.containsMouse || root.client.thinking === modelData
+                        ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.14)
+                        : "transparent"
+                      Text {
+                        anchors.fill: parent
+                        anchors.leftMargin: Style.space(8)
+                        verticalAlignment: Text.AlignVCenter
+                        text: modelData
+                        color: root.foreground
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.caption
+                      }
+                      MouseArea {
+                        id: optionMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: { root.client.setThinking(modelData); thinkingMenu.close() }
+                      }
+                    }
+                  }
+                }
               }
             }
             Text { width: parent.width; visible: root.client.errorText.length > 0; text: root.client.errorText; color: Color.urgent; font.family: Style.font.family; font.pixelSize: Style.font.caption; wrapMode: Text.WordWrap }
             ListView {
               id: messageList
-              width: parent.width; height: parent.height - composerBox.height - Style.space(38); clip: true; model: root.client.messages; spacing: Style.space(7)
+              width: parent.width; height: parent.height - composerBox.height - activityLine.height - Style.space(38); clip: true; model: root.client.messages; spacing: Style.space(7)
               onCountChanged: Qt.callLater(function() { messageList.positionViewAtEnd() })
               delegate: Item {
                 required property var modelData
@@ -192,6 +233,23 @@ Panel {
               }
               footer: TextEdit { width: messageList.width * 0.78; visible: root.client.partial.length > 0; text: root.client.partial; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.body; wrapMode: TextEdit.Wrap; readOnly: true; selectByMouse: true }
             }
+            Text {
+              id: activityLine
+              width: parent.width
+              height: visible ? implicitHeight : 0
+              visible: root.client.working
+              text: "◌  " + (root.client.activityText || "Working…")
+              color: root.muted
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+              SequentialAnimation on opacity {
+                running: activityLine.visible
+                loops: Animation.Infinite
+                NumberAnimation { to: 0.45; duration: 700 }
+                NumberAnimation { to: 1.0; duration: 700 }
+              }
+            }
             Rectangle {
               id: composerBox
               width: parent.width; height: Math.min(Style.space(150), Math.max(Style.space(54), composer.contentHeight + Style.space(20))); color: Qt.rgba(0.5, 0.5, 0.5, 0.13); radius: Style.space(12); clip: true
@@ -207,6 +265,12 @@ Panel {
                   onCursorRectangleChanged: {
                     if (cursorRectangle.y < composerScroll.contentY) composerScroll.contentY = cursorRectangle.y
                     else if (cursorRectangle.y + cursorRectangle.height > composerScroll.contentY + composerScroll.height) composerScroll.contentY = cursorRectangle.y + cursorRectangle.height - composerScroll.height
+                  }
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Space && (event.modifiers & Qt.ShiftModifier)) {
+                      composer.insert(composer.cursorPosition, "\n")
+                      event.accepted = true
+                    }
                   }
                   Keys.onReturnPressed: function(event) { if (!(event.modifiers & Qt.ShiftModifier)) { root.client.send(composer.text); composer.text = ""; event.accepted = true } }
                 }

@@ -3,7 +3,7 @@
 // only sees the unix socket; credentials stay in Pi's 0600 auth store.
 import { createServer } from "node:net";
 import { mkdir, chmod, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn, execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -61,6 +61,40 @@ function uiMessages(messages) {
 }
 async function writeState() { await writeJson(statePath, state); }
 async function writeThreads() { await writeJson(threadsPath, threads); }
+
+function configuredModel() {
+  if (state.model) return state.model;
+  if (state.provider !== "codex") return "default";
+  if (process.env.CODEX_MODEL) return process.env.CODEX_MODEL;
+  try {
+    const config = readFileSync(join(home, ".codex/config.toml"), "utf8");
+    return config.match(/^model\s*=\s*["']([^"']+)["']/m)?.[1] || "default";
+  } catch { return "default"; }
+}
+
+function activityForItem(item, phase = "started") {
+  const type = item?.type || "";
+  if (type === "reasoning") return "Thinking…";
+  if (type === "agent_message") return phase === "completed" ? "Finishing…" : "Writing…";
+  if (type === "command_execution") return phase === "completed" ? "Finished running a command" : "Running a command…";
+  if (type === "mcp_tool_call" || type === "function_call" || type === "custom_tool_call") return "Using a tool…";
+  if (type === "web_search_call") return "Searching the web…";
+  if (type === "file_change" || type === "file_edit") return "Editing files…";
+  if (type === "computer_call") return "Working with the desktop…";
+  return phase === "completed" ? "Working…" : "Thinking…";
+}
+
+function activityForPiEvent(event) {
+  if (event.type === "tool_execution_start") {
+    const name = event.toolName || event.toolCall?.name || event.tool?.name;
+    return name ? `Using ${name}…` : "Using a tool…";
+  }
+  if (event.type === "tool_execution_update") return "Using a tool…";
+  if (event.type === "tool_execution_end") return "Thinking…";
+  if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") return "Writing…";
+  if (event.type === "turn_start" || event.type === "message_start") return "Thinking…";
+  return "";
+}
 
 async function runtimeContext() {
   const commands = [
@@ -134,10 +168,17 @@ class Runner {
       const { resolve, reject } = this.pending.get(event.id); this.pending.delete(event.id);
       event.success ? resolve(event.data) : reject(new Error(event.error?.message || "Pi rejected request")); return;
     }
+    const activity = activityForPiEvent(event);
+    if (activity) broadcast("activity", { threadId: this.thread.id, text: activity, active: true });
     if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta")
       broadcast("assistantDelta", { threadId: this.thread.id, delta: event.assistantMessageEvent.delta });
-    else if (event.type === "turn_end") broadcast("turnEnd", { threadId: this.thread.id });
-    else if (event.type === "agent_end") broadcast("agentEnd", { threadId: this.thread.id });
+    else if (event.type === "turn_end") {
+      broadcast("activity", { threadId: this.thread.id, text: "", active: false });
+      broadcast("turnEnd", { threadId: this.thread.id });
+    } else if (event.type === "agent_end") {
+      broadcast("activity", { threadId: this.thread.id, text: "", active: false });
+      broadcast("agentEnd", { threadId: this.thread.id });
+    }
   }
   rpc(command) {
     this.lastUsed = Date.now();
@@ -163,6 +204,7 @@ class Runner {
       ? ["exec", "resume", ...resumeOptions, this.thread.codexSessionId, prompt]
       : ["exec", ...newSessionOptions, "--sandbox", "workspace-write", "--add-dir", home, prompt];
     this.lastUsed = Date.now();
+    broadcast("activity", { threadId: this.thread.id, text: "Thinking…", active: true });
     return new Promise((resolve, reject) => {
       let buffer = "";
       const child = this.commandProcess = spawn("codex", args, { cwd: home, stdio: ["ignore", "pipe", "pipe"] });
@@ -171,27 +213,40 @@ class Runner {
         try {
           const event = JSON.parse(line);
           if (event.type === "thread.started" && event.thread_id) { this.thread.codexSessionId = event.thread_id; writeThreads(); }
+          if (event.type === "item.started" || event.type === "item.updated") {
+            broadcast("activity", { threadId: this.thread.id, text: activityForItem(event.item), active: true });
+          }
           if (event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text) {
             const item = { role: "assistant", text: event.item.text, timestamp: Date.now() };
             this.thread.messages = [...(this.thread.messages || []), item]; writeThreads();
             broadcast("assistantDelta", { threadId: this.thread.id, delta: event.item.text });
           }
-          if (event.type === "turn.completed") broadcast("turnEnd", { threadId: this.thread.id });
+          if (event.type === "item.completed") {
+            broadcast("activity", { threadId: this.thread.id, text: activityForItem(event.item, "completed"), active: true });
+          }
+          if (event.type === "turn.completed") {
+            broadcast("activity", { threadId: this.thread.id, text: "", active: false });
+            broadcast("turnEnd", { threadId: this.thread.id });
+          }
         } catch { broadcast("diagnostic", { threadId: this.thread.id, text: "Codex emitted invalid JSON" }); }
       };
       child.stdout.on("data", data => { buffer += String(data); let at; while ((at = buffer.indexOf("\n")) >= 0) { consume(buffer.slice(0, at)); buffer = buffer.slice(at + 1); } });
       child.stderr.on("data", data => broadcast("diagnostic", { threadId: this.thread.id, text: String(data) }));
       child.on("error", reject);
-      child.on("exit", code => { this.commandProcess = null; if (code === 0) { broadcast("turnEnd", { threadId: this.thread.id }); resolve({ accepted: true }); } else reject(new Error(`Codex exited with status ${code}`)); });
+      child.on("exit", code => { this.commandProcess = null; if (code === 0) { broadcast("activity", { threadId: this.thread.id, text: "", active: false }); broadcast("turnEnd", { threadId: this.thread.id }); resolve({ accepted: true }); } else reject(new Error(`Codex exited with status ${code}`)); });
     });
   }
-  async prompt(message) { await this.start(); return this.backend === "codex" ? this.codexPrompt(message) : this.rpc({ type: "prompt", message }); }
+  async prompt(message) {
+    await this.start();
+    broadcast("activity", { threadId: this.thread.id, text: "Thinking…", active: true });
+    return this.backend === "codex" ? this.codexPrompt(message) : this.rpc({ type: "prompt", message });
+  }
   stop() { this.process?.kill("SIGTERM"); this.commandProcess?.kill("SIGTERM"); }
 }
 async function runnerFor(thread) { let runner = runners.get(thread.id); if (!runner) { runner = new Runner(thread); runners.set(thread.id, runner); } await runner.start(); return runner; }
 
 async function dispatch(method, params = {}) {
-  if (method === "status") return { state, providerStatus: await providerStatus(), threads: threads.filter(t => !t.archived).map(threadSummary) };
+  if (method === "status") return { state: { ...state, model: configuredModel() }, providerStatus: await providerStatus(), threads: threads.filter(t => !t.archived).map(threadSummary) };
   if (method === "configure") {
     state = { ...state, provider: String(params.provider || ""), model: String(params.model || ""), configured: true };
     for (const runner of runners.values()) runner.stop();

@@ -23,23 +23,35 @@ Item {
   property var messages: []
   property string partial: ""
   property string errorText: ""
+  property bool working: false
+  property string activityText: ""
   property var pending: ({})
   property var socketRef: null
   property int pendingCount: 0
   readonly property string activityState: {
     if (!root.online) return "offline"
     if (root.partial.length > 0) return "receiving"
+    if (root.working) return "working"
     if (root.pendingCount > 0) return "sending"
     return "ready"
   }
   readonly property string activityGlyph: {
     if (root.activityState === "sending") return "↕"
     if (root.activityState === "receiving") return "◌"
+    if (root.activityState === "working") return "◌"
     if (root.activityState === "ready") return "●"
     return "○"
   }
 
   readonly property string effectiveSocketPath: socketPath.length > 0 ? socketPath : ((Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/omarchy-agent.sock")
+  readonly property string providerLabel: {
+    if (root.provider === "codex") return "Codex"
+    if (root.provider === "ollama") return "Ollama"
+    if (root.provider === "anthropic") return "Claude"
+    if (root.provider === "openrouter") return "OpenRouter"
+    return root.provider
+  }
+  readonly property string modelLabel: root.model.length > 0 ? root.model : "default"
 
   // Hydrate the last selection immediately from the daemon's state file. The
   // socket status call still refreshes readiness, but the panel never has to
@@ -109,15 +121,17 @@ Item {
     loginRunner.command = ["omarchy-launch-tui", "--app-id=org.omarchy.agent.setup", "pi", "--provider", root.provider]
     loginRunner.running = true
   }
-  function newThread() { root.activeThreadId = ""; root.messages = []; root.partial = "" }
+  function newThread() { root.activeThreadId = ""; root.messages = []; root.partial = ""; root.working = false; root.activityText = "" }
   function openThread(id) {
-    root.activeThreadId = id; root.partial = ""
+    root.activeThreadId = id; root.partial = ""; root.working = false; root.activityText = ""
     request("messages", { threadId: id }, function(data) { root.messages = data.messages || [] })
   }
   function send(text) {
     if (!text || !text.trim().length) return
     var message = text.trim()
     root.errorText = ""
+    root.working = true
+    root.activityText = "Thinking…"
     if (!root.activeThreadId) {
       request("createThread", { message: message }, function(thread) {
         root.activeThreadId = thread.id; root.threads.unshift(thread)
@@ -154,13 +168,17 @@ Item {
         var callback = root.pending[frame.id]; delete root.pending[frame.id]
         root.pendingCount = Math.max(0, root.pendingCount - 1)
         if (frame.ok && callback) callback(frame.data)
-        else if (!frame.ok) root.errorText = frame.error || "Agent request failed"
+        else if (!frame.ok) { root.errorText = frame.error || "Agent request failed"; root.working = false; root.activityText = "" }
         return
       }
       if (frame.event === "assistantDelta" && frame.data.threadId === root.activeThreadId) { root.partial += frame.data.delta }
+      if (frame.event === "activity" && frame.data.threadId === root.activeThreadId) {
+        root.working = frame.data.active !== false
+        root.activityText = frame.data.text || (root.working ? "Working…" : "")
+      }
       if (frame.event === "turnEnd" && frame.data.threadId === root.activeThreadId) {
         if (root.partial.length > 0) root.messages = root.messages.concat([{ role: "assistant", text: root.partial }])
-        root.partial = ""; root.refresh()
+        root.partial = ""; root.working = false; root.activityText = ""; root.refresh()
       }
     } catch (e) { root.errorText = "Could not read response from agent service" }
   }
