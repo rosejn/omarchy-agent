@@ -15,6 +15,12 @@ Panel {
   property var client: null
   property bool threadsCollapsed: false
   property bool settingsOpen: false
+  property string threadMenuId: ""
+  property real threadMenuX: 0
+  property real threadMenuY: 0
+  property string renameThreadId: ""
+  property string renameText: ""
+  property string deleteThreadId: ""
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color muted: Qt.darker(foreground, 1.55)
   function open() { root.controller.show() }
@@ -112,14 +118,43 @@ Panel {
                 width: parent.width; height: parent.height - y - Style.space(26); clip: true; model: root.client.threads; spacing: Style.space(3)
                 delegate: Item {
                   required property var modelData
-                  width: ListView.view.width; height: Style.space(48)
+                  id: threadRow
+                  width: ListView.view.width; height: Style.space(32)
                   Rectangle { anchors.fill: parent; color: root.client.activeThreadId === modelData.id ? Qt.rgba(0.5, 0.5, 0.5, 0.16) : "transparent"; radius: Style.space(5) }
-                  Column {
-                    anchors.fill: parent; anchors.margins: Style.space(5)
-                    Text { width: parent.width; text: (parent.parent.modelData.pinned ? "★ " : "") + parent.parent.modelData.title; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: parent.parent.modelData.pinned; elide: Text.ElideRight }
-                    Text { width: parent.width; text: parent.parent.modelData.preview || ""; color: root.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                  Text {
+                    anchors.left: parent.left; anchors.leftMargin: Style.space(5)
+                    anchors.right: threadOptions.left; anchors.rightMargin: Style.space(2)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: (threadRow.modelData.pinned ? "★ " : "") + threadRow.modelData.title
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.bold: threadRow.modelData.pinned
+                    elide: Text.ElideRight
                   }
-                  MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.client.openThread(parent.modelData.id) }
+                  Text {
+                    id: threadOptions
+                    anchors.right: parent.right; anchors.rightMargin: Style.space(5); anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(20)
+                    text: "⋯"
+                    color: root.foreground
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.subtitle
+                    horizontalAlignment: Text.AlignHCenter
+                    visible: threadHover.hovered || root.threadMenuId === threadRow.modelData.id
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: {
+                        root.threadMenuId = threadRow.modelData.id
+                        root.threadMenuX = threadRow.mapToItem(panel, threadRow.width - threadActionsPopup.width - Style.space(4), threadRow.height).x
+                        root.threadMenuY = threadRow.mapToItem(panel, 0, threadRow.height).y
+                        threadActionsPopup.open()
+                      }
+                    }
+                  }
+                  HoverHandler { id: threadHover }
+                  MouseArea { anchors.fill: parent; z: -1; cursorShape: Qt.PointingHandCursor; onClicked: root.client.openThread(threadRow.modelData.id) }
                 }
               }
               Text {
@@ -272,12 +307,101 @@ Panel {
                       event.accepted = true
                     }
                   }
-                  Keys.onReturnPressed: function(event) { if (!(event.modifiers & Qt.ShiftModifier)) { root.client.send(composer.text); composer.text = ""; event.accepted = true } }
+                  Keys.onReturnPressed: function(event) {
+                    if (event.modifiers & Qt.ShiftModifier) {
+                      composer.insert(composer.cursorPosition, "\n")
+                      event.accepted = true
+                    } else {
+                      root.client.send(composer.text)
+                      composer.text = ""
+                      event.accepted = true
+                    }
+                  }
                 }
               }
               Text { id: dictationButton; text: "◉"; anchors.right: sendButton.left; anchors.rightMargin: Style.space(8); anchors.verticalCenter: parent.verticalCenter; color: root.muted; font.family: Style.font.family; font.pixelSize: Style.font.subtitle; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { composer.forceActiveFocus(); dictation.running = true } } }
               Text { id: sendButton; text: "↑"; anchors.right: parent.right; anchors.rightMargin: Style.space(12); anchors.verticalCenter: parent.verticalCenter; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.title; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.client.send(composer.text); composer.text = "" } } }
             }
+            }
+          }
+        }
+
+        Popup {
+          id: threadActionsPopup
+          parent: panel
+          x: root.threadMenuX
+          y: root.threadMenuY
+          width: Style.space(150)
+          padding: Style.space(5)
+          closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+          background: Rectangle {
+            color: Color.background
+            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35)
+            border.width: 1
+            radius: Style.space(8)
+          }
+          contentItem: Column {
+            spacing: Style.space(2)
+            Text {
+              width: parent.width; height: Style.space(28); text: "Rename"; color: root.foreground
+              font.family: Style.font.family; font.pixelSize: Style.font.caption; verticalAlignment: Text.AlignVCenter
+              MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.renameThreadId = root.threadMenuId; root.renameText = root.client.threads.filter(function(t) { return t.id === root.threadMenuId })[0].title; threadActionsPopup.close(); renamePopup.open(); Qt.callLater(function() { renameField.forceActiveFocus(); renameField.selectAll() }) } }
+            }
+            Text {
+              width: parent.width; height: Style.space(28); text: "Delete"; color: Color.urgent
+              font.family: Style.font.family; font.pixelSize: Style.font.caption; verticalAlignment: Text.AlignVCenter
+              MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.deleteThreadId = root.threadMenuId; threadActionsPopup.close(); deletePopup.open() } }
+            }
+          }
+        }
+
+        Popup {
+          id: renamePopup
+          parent: panel
+          anchors.centerIn: parent
+          width: Style.space(300)
+          padding: Style.space(12)
+          modal: true
+          closePolicy: Popup.CloseOnEscape
+          background: Rectangle { color: Color.background; border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35); border.width: 1; radius: Style.space(8) }
+          contentItem: Column {
+            spacing: Style.space(8)
+            Text { text: "Rename conversation"; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.body; font.bold: true }
+            TextInput {
+              id: renameField
+              width: parent.width
+              text: root.renameText
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              selectByMouse: true
+              Keys.onReturnPressed: root.commitRename()
+            }
+            Row {
+              spacing: Style.space(10)
+              Text { text: "Cancel"; color: root.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; onClicked: renamePopup.close() } }
+              Text { text: "Save"; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; onClicked: root.commitRename() } }
+            }
+          }
+        }
+
+        Popup {
+          id: deletePopup
+          parent: panel
+          anchors.centerIn: parent
+          width: Style.space(300)
+          padding: Style.space(12)
+          modal: true
+          closePolicy: Popup.CloseOnEscape
+          background: Rectangle { color: Color.background; border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.35); border.width: 1; radius: Style.space(8) }
+          contentItem: Column {
+            spacing: Style.space(8)
+            Text { text: "Delete conversation?"; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.body; font.bold: true }
+            Text { width: parent.width; text: "This removes it from the Agent session list."; color: root.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; wrapMode: Text.WordWrap }
+            Row {
+              spacing: Style.space(10)
+              Text { text: "Cancel"; color: root.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; onClicked: deletePopup.close() } }
+              Text { text: "Delete"; color: Color.urgent; font.family: Style.font.family; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; onClicked: { root.client.deleteThread(root.deleteThreadId); deletePopup.close() } } }
             }
           }
         }
@@ -312,5 +436,12 @@ Panel {
         }
       }
     }
+  }
+
+  function commitRename() {
+    var title = renameField.text.trim()
+    if (!renameThreadId || !title.length) return
+    root.client.renameThread(renameThreadId, title)
+    renamePopup.close()
   }
 }
